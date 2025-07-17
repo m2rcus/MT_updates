@@ -1,0 +1,5 @@
+requests
+requests[security]
+beautifulsoup4
+python-telegram-bot
+# For summarization, this bot uses the Hugging Face Inference API (facebook/bart-large-cnn) 
