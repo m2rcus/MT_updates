@@ -292,7 +292,7 @@ def send_morning_digest():
             f"• S&P 500: {sp500_price}\n\n"
             f"Will update you periodically! 📈"
         )
-        # Use synchronous sending instead of asyncio.run
+        # Use the correct method for python-telegram-bot 13.x
         bot.send_message(chat_id=CHANNEL, text=message, parse_mode='Markdown')
         print("Sent morning digest.")
     except Exception as e:
