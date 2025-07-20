@@ -1,5 +1,5 @@
 requests==2.31.0
 beautifulsoup4==4.12.2
-python-telegram-bot==13.7
+python-telegram-bot==12.8
 pytz==2023.3
 flask==3.0.0
