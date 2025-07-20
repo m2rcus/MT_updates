@@ -280,6 +280,10 @@ def get_pitchbook_cap_raises():
 
 def send_morning_digest():
     try:
+        print(f"[DEBUG] Starting morning digest...")
+        print(f"[DEBUG] Channel ID: {CHANNEL}")
+        print(f"[DEBUG] Bot token length: {len(BOT_TOKEN) if BOT_TOKEN else 0}")
+        
         btc_price, eth_price, sp500_price = fetch_crypto_prices()
         message = (
             f"Good Morning Sam and Lucas! 🌅\n\n"
@@ -292,11 +296,18 @@ def send_morning_digest():
             f"• S&P 500: {sp500_price}\n\n"
             f"Will update you periodically! 📈"
         )
+        
+        print(f"[DEBUG] Message prepared, attempting to send...")
+        print(f"[DEBUG] Message length: {len(message)}")
+        
         # Use the correct method for python-telegram-bot 13.x
-        bot.send_message(chat_id=CHANNEL, text=message, parse_mode='Markdown')
+        result = bot.send_message(chat_id=CHANNEL, text=message, parse_mode='Markdown')
+        print(f"[DEBUG] Send result: {result}")
         print("Sent morning digest.")
     except Exception as e:
         print(f"Error sending morning digest: {e}")
+        print(f"[DEBUG] Exception type: {type(e)}")
+        print(f"[DEBUG] Exception details: {str(e)}")
 
 def is_bot_quiet():
     global bot_quiet_until
