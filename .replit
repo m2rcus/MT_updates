@@ -1,0 +1,26 @@
+run = "/home/runner/workspace/.pythonlibs/bin/python bot.py"
+entrypoint = "bot.py"
+
+[nix]
+channel = "stable-22_11"
+
+[env]
+PYTHONPATH = "${PYTHONPATH}:${REPL_HOME}"
+
+[packager]
+language = "python3"
+
+[packager.features]
+packageSearch = true
+guessImports = true
+
+[languages.python3]
+pattern = "**/*.py"
+syntax = "python"
+
+[languages.python3.languageServer]
+start = [ "pylsp" ]
+
+[deployment]
+run = ["sh", "-c", "/home/runner/workspace/.pythonlibs/bin/python bot.py"]
+deploymentTarget = "cloudrun" 
