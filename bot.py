@@ -279,20 +279,21 @@ def get_pitchbook_cap_raises():
         return []
 
 def send_morning_digest():
-    btc_price, eth_price, sp500_price = fetch_crypto_prices()
-    message = (
-        f"Good Morning Sam and Lucas! 🌅\n\n"
-        f"Breaking news in crypto, iGaming, and cap raises will be sent here periodically.\n\n"
-        f"If you want me to shut up at any time, say `/shutup`, and I will be quiet for the next 6 hours.\n\n"
-        f"Use `/bignews` to get the latest news immediately!\n\n"
-        f"*Current Market Prices:*\n"
-        f"• Bitcoin: {btc_price}\n"
-        f"• Ethereum: {eth_price}\n"
-        f"• S&P 500: {sp500_price}\n\n"
-        f"Will update you periodically! 📈"
-    )
     try:
-        asyncio.run(bot.send_message(chat_id=CHANNEL, text=message, parse_mode='Markdown'))
+        btc_price, eth_price, sp500_price = fetch_crypto_prices()
+        message = (
+            f"Good Morning Sam and Lucas! 🌅\n\n"
+            f"Breaking news in crypto, iGaming, and cap raises will be sent here periodically.\n\n"
+            f"If you want me to shut up at any time, say `/shutup`, and I will be quiet for the next 6 hours.\n\n"
+            f"Use `/bignews` to get the latest news immediately!\n\n"
+            f"*Current Market Prices:*\n"
+            f"• Bitcoin: {btc_price}\n"
+            f"• Ethereum: {eth_price}\n"
+            f"• S&P 500: {sp500_price}\n\n"
+            f"Will update you periodically! 📈"
+        )
+        # Use synchronous sending instead of asyncio.run
+        bot.send_message(chat_id=CHANNEL, text=message, parse_mode='Markdown')
         print("Sent morning digest.")
     except Exception as e:
         print(f"Error sending morning digest: {e}")
@@ -362,57 +363,64 @@ def setup_command_handler():
 
 def post_news_immediate():
     """Post news immediately without checking quiet state (for /bignews command)"""
-    igaming_news = get_igaming_news()
-    cnbc_news = get_cnbc_crypto_news()
-    pitchbook_news = get_pitchbook_cap_raises()
-    updates = igaming_news + cnbc_news + pitchbook_news
-    print(f"[BIGNEWS] Found {len(igaming_news)} iGaming articles")
-    print(f"[BIGNEWS] Found {len(cnbc_news)} CNBC articles")
-    print(f"[BIGNEWS] Found {len(pitchbook_news)} PitchBook cap raise articles")
-    print(f"[BIGNEWS] Total new articles to post: {len(updates)}")
-    if not updates:
-        print("[BIGNEWS] No new articles found to post")
+    try:
+        igaming_news = get_igaming_news()
+        cnbc_news = get_cnbc_crypto_news()
+        pitchbook_news = get_pitchbook_cap_raises()
+        updates = igaming_news + cnbc_news + pitchbook_news
+        print(f"[BIGNEWS] Found {len(igaming_news)} iGaming articles")
+        print(f"[BIGNEWS] Found {len(cnbc_news)} CNBC articles")
+        print(f"[BIGNEWS] Found {len(pitchbook_news)} PitchBook cap raise articles")
+        print(f"[BIGNEWS] Total new articles to post: {len(updates)}")
+        if not updates:
+            print("[BIGNEWS] No new articles found to post")
+            return 0
+        save_sent_headlines(sent_headlines)
+
+        # Use synchronous sending instead of asyncio.run
+        for update in updates:
+            try:
+                bot.send_message(chat_id=CHANNEL, text=update, parse_mode='Markdown')
+                print(f"[BIGNEWS] Posted: {update[:50]}...")
+                time.sleep(2)  # Use time.sleep instead of asyncio.sleep
+            except Exception as e:
+                print(f"[BIGNEWS] Error posting message: {e}")
+
+        return len(updates)
+    except Exception as e:
+        print(f"Error in post_news_immediate: {e}")
         return 0
-    save_sent_headlines(sent_headlines)
-
-    # Fix event loop issue by using synchronous sending
-    for update in updates:
-        try:
-            asyncio.run(bot.send_message(chat_id=CHANNEL, text=update, parse_mode='Markdown'))
-            print(f"[BIGNEWS] Posted: {update[:50]}...")
-            time.sleep(2)  # Use time.sleep instead of asyncio.sleep
-        except Exception as e:
-            print(f"[BIGNEWS] Error posting message: {e}")
-
-    return len(updates)
 
 def post_news():
-    # Check if bot is quiet
-    if is_bot_quiet():
-        print("Bot is quiet, skipping news posts.")
-        return
+    try:
+        # Check if bot is quiet
+        if is_bot_quiet():
+            print("Bot is quiet, skipping news posts.")
+            return
 
-    igaming_news = get_igaming_news()
-    cnbc_news = get_cnbc_crypto_news()
-    pitchbook_news = get_pitchbook_cap_raises()
-    updates = igaming_news + cnbc_news + pitchbook_news
-    print(f"Found {len(igaming_news)} iGaming articles")
-    print(f"Found {len(cnbc_news)} CNBC articles")
-    print(f"Found {len(pitchbook_news)} PitchBook cap raise articles")
-    print(f"Total new articles to post: {len(updates)}")
-    if not updates:
-        print("No new articles found to post")
-        return
-    save_sent_headlines(sent_headlines)
+        igaming_news = get_igaming_news()
+        cnbc_news = get_cnbc_crypto_news()
+        pitchbook_news = get_pitchbook_cap_raises()
+        updates = igaming_news + cnbc_news + pitchbook_news
+        print(f"Found {len(igaming_news)} iGaming articles")
+        print(f"Found {len(cnbc_news)} CNBC articles")
+        print(f"Found {len(pitchbook_news)} PitchBook cap raise articles")
+        print(f"Total new articles to post: {len(updates)}")
+        if not updates:
+            print("No new articles found to post")
+            return
+        save_sent_headlines(sent_headlines)
 
-    # Fix event loop issue by using synchronous sending
-    for update in updates:
-        try:
-            asyncio.run(bot.send_message(chat_id=CHANNEL, text=update, parse_mode='Markdown'))
-            print(f"Posted: {update[:50]}...")
-            time.sleep(2)  # Use time.sleep instead of asyncio.sleep
-        except Exception as e:
-            print(f"Error posting message: {e}")
+        # Use synchronous sending instead of asyncio.run
+        for update in updates:
+            try:
+                bot.send_message(chat_id=CHANNEL, text=update, parse_mode='Markdown')
+                print(f"Posted: {update[:50]}...")
+                time.sleep(2)  # Use time.sleep instead of asyncio.sleep
+            except Exception as e:
+                print(f"Error posting message: {e}")
+    except Exception as e:
+        print(f"Error in post_news: {e}")
 
 def is_pst_9am():
     tz = pytz.timezone('US/Pacific')
@@ -421,45 +429,61 @@ def is_pst_9am():
 
 async def run_bot():
     """Run the bot with both command handling and news loop"""
-    print("Bot starting...")
-    print(f"Bot token configured: {'Yes' if BOT_TOKEN else 'No'}")
-    print(f"Channel configured: {CHANNEL}")
-    print(f"Loaded {len(sent_headlines)} previously sent headlines")
+    try:
+        print("Bot starting...")
+        print(f"Bot token configured: {'Yes' if BOT_TOKEN else 'No'}")
+        print(f"Channel configured: {CHANNEL}")
+        print(f"Loaded {len(sent_headlines)} previously sent headlines")
 
-    # Send the morning digest immediately for testing
-    send_morning_digest()
+        # Send the morning digest immediately for testing
+        send_morning_digest()
 
-    # Setup command handler
-    application = setup_command_handler()
+        # Setup command handler
+        application = setup_command_handler()
+        if application is None:
+            print("Failed to setup command handler, exiting...")
+            return
 
-    # Start the application
-    await application.initialize()
-    await application.start()
-    await application.updater.start_polling()
+        # Start the application
+        await application.initialize()
+        await application.start()
+        await application.updater.start_polling()
 
-    print("Bot is now running and listening for commands!")
+        print("Bot is now running and listening for commands!")
 
-    # Run the news loop in the background
-    while True:
-        if is_pst_9am():
-            send_morning_digest()
-            await asyncio.sleep(60)
-        print("Fetching news...")
-        post_news()
-        print("Waiting 1 hour before next update...")
-        await asyncio.sleep(3600)
+        # Run the news loop in the background
+        while True:
+            try:
+                if is_pst_9am():
+                    send_morning_digest()
+                    await asyncio.sleep(60)
+                print("Fetching news...")
+                post_news()
+                print("Waiting 1 hour before next update...")
+                await asyncio.sleep(3600)
+            except Exception as e:
+                print(f"Error in main loop: {e}")
+                await asyncio.sleep(60)  # Wait a minute before retrying
+    except Exception as e:
+        print(f"Error in run_bot: {e}")
 
 def main():
     """Main entry point"""
     try:
+        print("🚀 Starting MT Updates Bot...")
+        
         # Start Flask web server in a separate thread
-        flask_thread = threading.Thread(target=run_flask)
+        flask_thread = threading.Thread(target=run_flask, daemon=True)
         flask_thread.start()
+        print("✅ Flask web server started")
 
         # Run the bot
         asyncio.run(run_bot())
     except KeyboardInterrupt:
         print("Bot shutting down...")
+    except Exception as e:
+        print(f"Fatal error: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main() 
