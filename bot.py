@@ -1,18 +1,14 @@
 import os
 import requests
 from bs4 import BeautifulSoup
-import telegram
-from telegram.ext import Application, CommandHandler
 import time
 import json
-import hashlib
 import asyncio
 from datetime import datetime, timedelta
 import pytz
 import xml.etree.ElementTree as ET
 import threading
 from flask import Flask, render_template_string
-import threading
 import sys
 
 # Check environment variables first
@@ -32,8 +28,6 @@ try:
     
     print(f"✅ BOT_TOKEN: {'Set' if BOT_TOKEN else 'Not set'}")
     print(f"✅ CHANNEL: {CHANNEL}")
-    
-    bot = telegram.Bot(token=BOT_TOKEN)
     
 except Exception as e:
     print(f"❌ Error setting up bot: {e}")
@@ -110,20 +104,47 @@ def load_sent_headlines():
         with open('sent_headlines.json', 'r') as f:
             return set(json.load(f))
     except FileNotFoundError:
+        print("No existing sent_headlines.json found, starting fresh.")
+        return set()
+    except Exception as e:
+        print(f"Error loading sent headlines: {e}, starting fresh.")
         return set()
 
 def save_sent_headlines(headlines):
-    with open('sent_headlines.json', 'w') as f:
-        json.dump(list(headlines), f)
+    try:
+        with open('sent_headlines.json', 'w') as f:
+            json.dump(list(headlines), f)
+    except Exception as e:
+        print(f"Error saving sent headlines: {e}")
 
 sent_headlines = load_sent_headlines()
+
+def send_telegram_message(message):
+    """Send message to Telegram using simple HTTP requests"""
+    try:
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        data = {
+            'chat_id': CHANNEL,
+            'text': message,
+            'parse_mode': 'Markdown'
+        }
+        response = requests.post(url, data=data, timeout=10)
+        if response.status_code == 200:
+            print(f"✅ Message sent successfully")
+            return True
+        else:
+            print(f"❌ Failed to send message: {response.status_code} - {response.text}")
+            return False
+    except Exception as e:
+        print(f"❌ Error sending message: {e}")
+        return False
 
 def fetch_crypto_prices():
     """Fetch BTC, ETH, and S&P 500 prices through web scraping."""
     try:
         # Use a simpler approach - CoinGecko API for crypto prices
-        btc_response = requests.get('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd', headers=headers)
-        eth_response = requests.get('https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd', headers=headers)
+        btc_response = requests.get('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd', headers=headers, timeout=10)
+        eth_response = requests.get('https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd', headers=headers, timeout=10)
 
         if btc_response.status_code == 200 and eth_response.status_code == 200:
             btc_data = btc_response.json()
@@ -136,7 +157,7 @@ def fetch_crypto_prices():
 
         # For S&P 500, try a simpler approach
         try:
-            sp500_response = requests.get('https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC', headers=headers)
+            sp500_response = requests.get('https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC', headers=headers, timeout=10)
             if sp500_response.status_code == 200:
                 sp500_data = sp500_response.json()
                 sp500_price = f"${sp500_data['chart']['result'][0]['meta']['regularMarketPrice']:,.2f}"
@@ -154,7 +175,7 @@ def get_igaming_news():
     """Get iGaming news from RSS feed"""
     url = 'https://igamingbusiness.com/feed/'
     try:
-        r = requests.get(url, headers=headers)
+        r = requests.get(url, headers=headers, timeout=10)
         print(f"[DEBUG] iGaming Business RSS response status: {r.status_code}")
         if r.status_code != 200:
             print(f"[DEBUG] iGaming Business RSS request failed: {r.status_code}")
@@ -208,35 +229,39 @@ def get_igaming_news():
 
 def get_cnbc_crypto_news():
     url = 'https://www.cnbc.com/cryptoworld/'
-    r = requests.get(url, headers=headers)
-    print(f"[DEBUG] CNBC response status: {r.status_code}")
-    if r.status_code != 200:
-        print(f"[DEBUG] CNBC request failed: {r.status_code}")
+    try:
+        r = requests.get(url, headers=headers, timeout=10)
+        print(f"[DEBUG] CNBC response status: {r.status_code}")
+        if r.status_code != 200:
+            print(f"[DEBUG] CNBC request failed: {r.status_code}")
+            return []
+        print(f"[DEBUG] CNBC HTML snippet: {r.text[:500]}...")
+        soup = BeautifulSoup(r.text, 'html.parser')
+        articles = soup.select('a.Card-title')
+        print(f"[DEBUG] Found {len(articles)} raw CNBC articles")
+        news = []
+        skipped = 0
+        for a in articles:
+            title = a.get_text(strip=True)
+            link = a['href']
+            if link.startswith('/'):
+                link = f'https://www.cnbc.com{link}'
+            if title not in sent_headlines:
+                sent_headlines.add(title)
+                news.append(f"💰 *CNBC Crypto World*\n[{title}]({link})")
+            else:
+                skipped += 1
+                print(f"[DEBUG] Skipped CNBC article (already sent): {title}")
+        print(f"[DEBUG] CNBC: {len(news)} new, {skipped} skipped (already sent)")
+        return news
+    except Exception as e:
+        print(f"Error fetching CNBC news: {e}")
         return []
-    print(f"[DEBUG] CNBC HTML snippet: {r.text[:500]}...")
-    soup = BeautifulSoup(r.text, 'html.parser')
-    articles = soup.select('a.Card-title')
-    print(f"[DEBUG] Found {len(articles)} raw CNBC articles")
-    news = []
-    skipped = 0
-    for a in articles:
-        title = a.get_text(strip=True)
-        link = a['href']
-        if link.startswith('/'):
-            link = f'https://www.cnbc.com{link}'
-        if title not in sent_headlines:
-            sent_headlines.add(title)
-            news.append(f"💰 *CNBC Crypto World*\n[{title}]({link})")
-        else:
-            skipped += 1
-            print(f"[DEBUG] Skipped CNBC article (already sent): {title}")
-    print(f"[DEBUG] CNBC: {len(news)} new, {skipped} skipped (already sent)")
-    return news
 
 def get_pitchbook_cap_raises():
     url = 'https://pitchbook.com/news/rss'
     try:
-        r = requests.get(url, headers=pitchbook_headers)
+        r = requests.get(url, headers=pitchbook_headers, timeout=10)
         print(f"[DEBUG] PitchBook RSS response status: {r.status_code}")
         if r.status_code != 200:
             print(f"[DEBUG] PitchBook RSS request failed: {r.status_code}")
@@ -288,8 +313,6 @@ def send_morning_digest():
         message = (
             f"Good Morning Sam and Lucas! 🌅\n\n"
             f"Breaking news in crypto, iGaming, and cap raises will be sent here periodically.\n\n"
-            f"If you want me to shut up at any time, say `/shutup`, and I will be quiet for the next 6 hours.\n\n"
-            f"Use `/bignews` to get the latest news immediately!\n\n"
             f"*Current Market Prices:*\n"
             f"• Bitcoin: {btc_price}\n"
             f"• Ethereum: {eth_price}\n"
@@ -300,10 +323,11 @@ def send_morning_digest():
         print(f"[DEBUG] Message prepared, attempting to send...")
         print(f"[DEBUG] Message length: {len(message)}")
         
-        # Use the correct method for python-telegram-bot 13.x
-        result = bot.send_message(chat_id=CHANNEL, text=message, parse_mode='Markdown')
-        print(f"[DEBUG] Send result: {result}")
-        print("Sent morning digest.")
+        success = send_telegram_message(message)
+        if success:
+            print("✅ Sent morning digest.")
+        else:
+            print("❌ Failed to send morning digest.")
     except Exception as e:
         print(f"Error sending morning digest: {e}")
         print(f"[DEBUG] Exception type: {type(e)}")
@@ -317,90 +341,6 @@ def is_bot_quiet():
         bot_quiet_until = None
         return False
     return True
-
-async def handle_shutup_command(update, context):
-    """Handle the /shutup command"""
-    global bot_quiet_until
-    bot_quiet_until = datetime.now() + timedelta(hours=6)
-    message = "My bad Senor and Losh 😅\n\nI'll be quiet for the next 6 hours."
-    try:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text=message, parse_mode='Markdown')
-        print("Bot is now quiet for 6 hours.")
-    except Exception as e:
-        print(f"Error sending shutup response: {e}")
-
-async def handle_bignews_command(update, context):
-    """Handle the /bignews command"""
-    message = "Fetching the latest news for you..."
-    try:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text=message, parse_mode='Markdown')
-        # Trigger immediate news fetch (override quiet state)
-        news_count = post_news_immediate()
-        if news_count == 0:
-            await context.bot.send_message(chat_id=update.effective_chat.id, text="You are all up to date! 🐒🥁", parse_mode='Markdown')
-    except Exception as e:
-        print(f"Error handling bignews command: {e}")
-
-async def handle_start_command(update, context):
-    """Handle the /start command"""
-    btc_price, eth_price, sp500_price = fetch_crypto_prices()
-    message = (
-        f"Good Morning Sam and Lucas! 🌅\n\n"
-        f"Breaking news in crypto, iGaming, and cap raises will be sent here periodically.\n\n"
-        f"If you want me to shut up at any time, say `/shutup`, and I will be quiet for the next 6 hours.\n\n"
-        f"Use `/bignews` to get the latest news immediately!\n\n"
-        f"*Current Market Prices:*\n"
-        f"• Bitcoin: {btc_price}\n"
-        f"• Ethereum: {eth_price}\n"
-        f"• S&P 500: {sp500_price}\n\n"
-        f"Will update you periodically! 📈"
-    )
-    try:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text=message, parse_mode='Markdown')
-    except Exception as e:
-        print(f"Error sending start message: {e}")
-
-def setup_command_handler():
-    """Setup the command handler"""
-    application = Application.builder().token(BOT_TOKEN).build()
-
-    # Add command handlers
-    application.add_handler(CommandHandler("shutup", handle_shutup_command))
-    application.add_handler(CommandHandler("bignews", handle_bignews_command))
-    application.add_handler(CommandHandler("start", handle_start_command))
-
-    print("Command handler setup - listening for /shutup, /bignews, and /start commands")
-    return application
-
-def post_news_immediate():
-    """Post news immediately without checking quiet state (for /bignews command)"""
-    try:
-        igaming_news = get_igaming_news()
-        cnbc_news = get_cnbc_crypto_news()
-        pitchbook_news = get_pitchbook_cap_raises()
-        updates = igaming_news + cnbc_news + pitchbook_news
-        print(f"[BIGNEWS] Found {len(igaming_news)} iGaming articles")
-        print(f"[BIGNEWS] Found {len(cnbc_news)} CNBC articles")
-        print(f"[BIGNEWS] Found {len(pitchbook_news)} PitchBook cap raise articles")
-        print(f"[BIGNEWS] Total new articles to post: {len(updates)}")
-        if not updates:
-            print("[BIGNEWS] No new articles found to post")
-            return 0
-        save_sent_headlines(sent_headlines)
-
-        # Use synchronous sending instead of asyncio.run
-        for update in updates:
-            try:
-                bot.send_message(chat_id=CHANNEL, text=update, parse_mode='Markdown')
-                print(f"[BIGNEWS] Posted: {update[:50]}...")
-                time.sleep(2)  # Use time.sleep instead of asyncio.sleep
-            except Exception as e:
-                print(f"[BIGNEWS] Error posting message: {e}")
-
-        return len(updates)
-    except Exception as e:
-        print(f"Error in post_news_immediate: {e}")
-        return 0
 
 def post_news():
     try:
@@ -422,61 +362,28 @@ def post_news():
             return
         save_sent_headlines(sent_headlines)
 
-        # Use synchronous sending instead of asyncio.run
+        # Send each update
         for update in updates:
             try:
-                bot.send_message(chat_id=CHANNEL, text=update, parse_mode='Markdown')
-                print(f"Posted: {update[:50]}...")
-                time.sleep(2)  # Use time.sleep instead of asyncio.sleep
+                success = send_telegram_message(update)
+                if success:
+                    print(f"✅ Posted: {update[:50]}...")
+                else:
+                    print(f"❌ Failed to post: {update[:50]}...")
+                time.sleep(2)  # Wait between messages
             except Exception as e:
                 print(f"Error posting message: {e}")
     except Exception as e:
         print(f"Error in post_news: {e}")
 
 def is_pst_9am():
-    tz = pytz.timezone('US/Pacific')
-    now = datetime.now(tz)
-    return now.hour == 9 and now.minute == 0
-
-async def run_bot():
-    """Run the bot with both command handling and news loop"""
     try:
-        print("Bot starting...")
-        print(f"Bot token configured: {'Yes' if BOT_TOKEN else 'No'}")
-        print(f"Channel configured: {CHANNEL}")
-        print(f"Loaded {len(sent_headlines)} previously sent headlines")
-
-        # Send the morning digest immediately for testing
-        send_morning_digest()
-
-        # Setup command handler
-        application = setup_command_handler()
-        if application is None:
-            print("Failed to setup command handler, exiting...")
-            return
-
-        # Start the application
-        await application.initialize()
-        await application.start()
-        await application.updater.start_polling()
-
-        print("Bot is now running and listening for commands!")
-
-        # Run the news loop in the background
-        while True:
-            try:
-                if is_pst_9am():
-                    send_morning_digest()
-                    await asyncio.sleep(60)
-                print("Fetching news...")
-                post_news()
-                print("Waiting 1 hour before next update...")
-                await asyncio.sleep(3600)
-            except Exception as e:
-                print(f"Error in main loop: {e}")
-                await asyncio.sleep(60)  # Wait a minute before retrying
+        tz = pytz.timezone('US/Pacific')
+        now = datetime.now(tz)
+        return now.hour == 9 and now.minute == 0
     except Exception as e:
-        print(f"Error in run_bot: {e}")
+        print(f"Error checking PST time: {e}")
+        return False
 
 def main():
     """Main entry point"""
@@ -488,8 +395,33 @@ def main():
         flask_thread.start()
         print("✅ Flask web server started")
 
-        # Run the bot
-        asyncio.run(run_bot())
+        # Send initial morning digest
+        print("📤 Sending initial morning digest...")
+        send_morning_digest()
+
+        print("✅ Bot is now running and will check for news every hour!")
+        print(f"✅ Loaded {len(sent_headlines)} previously sent headlines")
+
+        # Main loop
+        while True:
+            try:
+                # Check if it's 9 AM PST for morning digest
+                if is_pst_9am():
+                    print("🌅 It's 9 AM PST, sending morning digest...")
+                    send_morning_digest()
+                    time.sleep(60)  # Wait a minute to avoid multiple sends
+                
+                # Check for news
+                print("📰 Fetching news...")
+                post_news()
+                
+                print("⏰ Waiting 1 hour before next update...")
+                time.sleep(3600)  # Wait 1 hour
+                
+            except Exception as e:
+                print(f"Error in main loop: {e}")
+                time.sleep(60)  # Wait a minute before retrying
+                
     except KeyboardInterrupt:
         print("Bot shutting down...")
     except Exception as e:
