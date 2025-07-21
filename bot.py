@@ -446,9 +446,10 @@ def main():
         flask_thread.start()
         print("✅ Flask web server started")
 
-        # Send initial morning digest
-        print("📤 Sending initial morning digest...")
-        send_morning_digest()
+        # Only send the morning digest if it's not 9am PST (let the scheduler handle the real one)
+        if not is_pst_9am():
+            print("📤 Sending initial morning digest...")
+            send_morning_digest()
 
         print("✅ Bot is now running and will check for news every hour!")
         print(f"✅ Loaded {len(sent_headlines)} previously sent headlines")
