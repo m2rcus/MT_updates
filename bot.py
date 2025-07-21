@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 import pytz
 import xml.etree.ElementTree as ET
 import threading
-from flask import Flask, render_template_string
+from flask import Flask, render_template_string, request, jsonify
 import sys
 
 # Check environment variables first
@@ -63,6 +63,65 @@ def home():
 @app.route('/health')
 def health():
     return {'status': 'healthy', 'timestamp': datetime.now().isoformat()}
+
+def build_digest():
+    btc_price, eth_price, sp500_price = fetch_crypto_prices()
+    igaming_news = get_igaming_news()
+    cnbc_news = get_cnbc_crypto_news()
+    pitchbook_news = get_pitchbook_cap_raises()
+
+    # Preview headlines (first from each if available)
+    preview = []
+    if igaming_news:
+        preview.append(f"iGaming: {igaming_news[0]}")
+    if pitchbook_news:
+        preview.append(f"PitchBook: {pitchbook_news[0]}")
+    if cnbc_news:
+        preview.append(f"CNBC: {cnbc_news[0]}")
+    if not preview:
+        preview.append("No top headlines today.")
+
+    # Format sections
+    def format_section(title, news):
+        if news:
+            return f"*{title}:*\n" + "\n".join(news)
+        else:
+            return f"*{title}:*\n_No pertinent news_"
+
+    digest = (
+        "🌅 Good Morning! Here’s your daily digest:\n\n"
+        f"*Crypto Prices:*\n"
+        f"• Bitcoin: {btc_price}\n"
+        f"• Ethereum: {eth_price}\n"
+        f"• S&P 500: {sp500_price}\n\n"
+        f"*Top Headlines Preview:*\n" + "\n".join(preview) + "\n\n"
+        + format_section("iGaming News", igaming_news) + "\n\n"
+        + format_section("PitchBook News", pitchbook_news) + "\n\n"
+        + format_section("CNBC Crypto News", cnbc_news)
+    )
+    return digest
+
+@app.route('/webhook', methods=['POST'])
+def telegram_webhook():
+    data = request.get_json()
+    print(f"[DEBUG] Webhook received: {data}")
+    if 'message' in data:
+        message = data['message']
+        chat_id = message['chat']['id']
+        text = message.get('text', '').strip()
+        if text == '/start':
+            send_telegram_message(welcome_message(), chat_id=chat_id)
+        elif text == '/bignews':
+            send_telegram_message("Fetching the latest news for you...", chat_id=chat_id)
+            digest = build_digest()
+            send_telegram_message(digest, chat_id=chat_id)
+        elif text == '/shutup':
+            global bot_quiet_until
+            bot_quiet_until = datetime.now() + timedelta(hours=6)
+            send_telegram_message("My bad Senor and Losh 😅\n\nI'll be quiet for the next 6 hours.", chat_id=chat_id)
+        else:
+            send_telegram_message("Unknown command. Try /start, /bignews, or /shutup.", chat_id=chat_id)
+    return jsonify({'ok': True})
 
 def run_flask():
     """Run Flask app in a separate thread"""
@@ -119,12 +178,12 @@ def save_sent_headlines(headlines):
 
 sent_headlines = load_sent_headlines()
 
-def send_telegram_message(message):
+def send_telegram_message(message, chat_id=None):
     """Send message to Telegram using simple HTTP requests"""
     try:
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
         data = {
-            'chat_id': CHANNEL,
+            'chat_id': chat_id if chat_id else CHANNEL,
             'text': message,
             'parse_mode': 'Markdown'
         }
@@ -138,6 +197,27 @@ def send_telegram_message(message):
     except Exception as e:
         print(f"❌ Error sending message: {e}")
         return False
+
+def welcome_message():
+    return (
+        "Good Morning Sam and Lucas! 🌅\n\n"
+        "Breaking news in crypto, iGaming, and cap raises will be sent here periodically.\n\n"
+        "*Bot Features:*\n"
+        "• `/start` - Get this welcome message and current market prices\n"
+        "• `/bignews` - Get the latest news immediately\n"
+        "• `/shutup` - Make me quiet for 6 hours\n\n"
+        "*Current Market Prices:*\n"
+        f"• Bitcoin: {fetch_crypto_prices()[0]}\n"
+        f"• Ethereum: {fetch_crypto_prices()[1]}\n"
+        f"• S&P 500: {fetch_crypto_prices()[2]}\n\n"
+        "Will update you periodically! 📈"
+    )
+
+def get_all_news():
+    igaming_news = get_igaming_news()
+    cnbc_news = get_cnbc_crypto_news()
+    pitchbook_news = get_pitchbook_cap_raises()
+    return igaming_news + cnbc_news + pitchbook_news
 
 def fetch_crypto_prices():
     """Fetch BTC, ETH, and S&P 500 prices through web scraping."""
@@ -308,21 +388,9 @@ def send_morning_digest():
         print(f"[DEBUG] Starting morning digest...")
         print(f"[DEBUG] Channel ID: {CHANNEL}")
         print(f"[DEBUG] Bot token length: {len(BOT_TOKEN) if BOT_TOKEN else 0}")
-        
-        btc_price, eth_price, sp500_price = fetch_crypto_prices()
-        message = (
-            f"Good Morning Sam and Lucas! 🌅\n\n"
-            f"Breaking news in crypto, iGaming, and cap raises will be sent here periodically.\n\n"
-            f"*Current Market Prices:*\n"
-            f"• Bitcoin: {btc_price}\n"
-            f"• Ethereum: {eth_price}\n"
-            f"• S&P 500: {sp500_price}\n\n"
-            f"Will update you periodically! 📈"
-        )
-        
+        message = build_digest()
         print(f"[DEBUG] Message prepared, attempting to send...")
         print(f"[DEBUG] Message length: {len(message)}")
-        
         success = send_telegram_message(message)
         if success:
             print("✅ Sent morning digest.")
@@ -349,30 +417,13 @@ def post_news():
             print("Bot is quiet, skipping news posts.")
             return
 
-        igaming_news = get_igaming_news()
-        cnbc_news = get_cnbc_crypto_news()
-        pitchbook_news = get_pitchbook_cap_raises()
-        updates = igaming_news + cnbc_news + pitchbook_news
-        print(f"Found {len(igaming_news)} iGaming articles")
-        print(f"Found {len(cnbc_news)} CNBC articles")
-        print(f"Found {len(pitchbook_news)} PitchBook cap raise articles")
-        print(f"Total new articles to post: {len(updates)}")
-        if not updates:
-            print("No new articles found to post")
-            return
-        save_sent_headlines(sent_headlines)
-
-        # Send each update
-        for update in updates:
-            try:
-                success = send_telegram_message(update)
-                if success:
-                    print(f"✅ Posted: {update[:50]}...")
-                else:
-                    print(f"❌ Failed to post: {update[:50]}...")
-                time.sleep(2)  # Wait between messages
-            except Exception as e:
-                print(f"Error posting message: {e}")
+        message = build_digest()
+        print(f"[DEBUG] Sending digest message...")
+        success = send_telegram_message(message)
+        if success:
+            print("✅ Digest posted.")
+        else:
+            print("❌ Failed to post digest.")
     except Exception as e:
         print(f"Error in post_news: {e}")
 
