@@ -70,14 +70,22 @@ def build_digest():
     cnbc_news = get_cnbc_crypto_news()
     pitchbook_news = get_pitchbook_cap_raises()
 
-    # Preview headlines (first from each if available)
+    # Preview headlines (first from iGaming and PitchBook if available)
     preview = []
     if igaming_news:
-        preview.append(f"iGaming: {igaming_news[0]}")
+        # Extract just the headline text for preview
+        import re
+        m = re.match(r"^.*\*iGaming Business\*\\n\[(.*?)\]", igaming_news[0])
+        if m:
+            preview.append(f"iGaming: {m.group(1)}")
+        else:
+            preview.append("iGaming: (headline)")
     if pitchbook_news:
-        preview.append(f"PitchBook: {pitchbook_news[0]}")
-    if cnbc_news:
-        preview.append(f"CNBC: {cnbc_news[0]}")
+        m = re.match(r"^.*\*PitchBook Cap Raise\*\\n\[(.*?)\]", pitchbook_news[0])
+        if m:
+            preview.append(f"PitchBook: {m.group(1)}")
+        else:
+            preview.append("PitchBook: (headline)")
     if not preview:
         preview.append("No top headlines today.")
 
