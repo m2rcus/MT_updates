@@ -157,6 +157,16 @@ headers = {
     'Upgrade-Insecure-Requests': '1',
 }
 
+# Special headers for iGaming Business
+igaming_headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Connection': 'keep-alive',
+    'Upgrade-Insecure-Requests': '1',
+}
+
 # Special headers for PitchBook
 pitchbook_headers = {
     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -238,9 +248,11 @@ def get_all_news():
 def fetch_crypto_prices():
     """Fetch BTC, ETH, and S&P 500 prices through web scraping."""
     try:
-        # Use a simpler approach - CoinGecko API for crypto prices
         btc_response = requests.get('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd', headers=headers, timeout=10)
         eth_response = requests.get('https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd', headers=headers, timeout=10)
+
+        print(f"[DEBUG] BTC status: {btc_response.status_code}, response: {btc_response.text}")
+        print(f"[DEBUG] ETH status: {eth_response.status_code}, response: {eth_response.text}")
 
         if btc_response.status_code == 200 and eth_response.status_code == 200:
             btc_data = btc_response.json()
@@ -271,7 +283,7 @@ def get_igaming_news():
     """Get iGaming news from RSS feed"""
     url = 'https://igamingbusiness.com/feed/'
     try:
-        r = requests.get(url, headers=headers, timeout=10)
+        r = requests.get(url, headers=igaming_headers, timeout=10)
         print(f"[DEBUG] iGaming Business RSS response status: {r.status_code}")
         if r.status_code != 200:
             print(f"[DEBUG] iGaming Business RSS request failed: {r.status_code}")
