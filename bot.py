@@ -63,12 +63,12 @@ bot_quiet_until: Optional[datetime] = None
 def md_escape(text: str) -> str:
     if not text:
         return text
-    return (text.replace("_", "\_")
-                .replace("*", "\*")
-                .replace("[", "\[")
-                .replace("]", "\]")
-                .replace("(", "\(")
-                .replace(")", "\)"))
+    return (text.replace("_", "\\_")
+                .replace("*", "\\*")
+                .replace("[", "\\[")
+                .replace("]", "\\]")
+                .replace("(", "\\(")
+                .replace(")", "\\)"))
 
 
 def chunk_message(text: str, max_len: int = TELEGRAM_MAX_CHARS) -> Iterable[str]:
@@ -179,8 +179,7 @@ class NewsItem:
     url: str
     emoji: str
     def to_markdown_line(self) -> str:
-        return f"{self.emoji} *{md_escape(self.source)}*
-[{md_escape(self.title)}]({self.url})"
+        return f"{self.emoji} *{md_escape(self.source)}*\n[{md_escape(self.title)}]({self.url})"
 
 
 # ---------------------------------------------------------------------------
@@ -487,33 +486,18 @@ def build_digest() -> Digest:
         preview_lines.append("No top headlines today.")
     def format_section(title: str, items: List[NewsItem]) -> str:
         if items:
-            return f"*{md_escape(title)}:*
-" + "
-".join(i.to_markdown_line() for i in items)
-        return f"*{md_escape(title)}:*
-_No pertinent news_"
+            return f"*{md_escape(title)}:*\n" + "\n".join(i.to_markdown_line() for i in items)
+        return f"*{md_escape(title)}:*\n_No pertinent news_"
     digest_text = (
-        "🌅 Good Morning Sam and Lucas! Here’s your daily digest:
-
-"
-        f"*Crypto Prices:*
-• Bitcoin: {btc_price}
-• Ethereum: {eth_price}
-• S&P 500: {sp500_price}
-
-"
-        f"*Top Headlines Preview:*
-" + "
-".join(preview_lines) + "
-
-" +
-        format_section("iGaming News", igaming_news) + "
-
-" +
-        format_section("PitchBook News", pitchbook_news) + "
-
-" +
-        format_section("CNBC Crypto News", cnbc_news)
+        "🌅 Good Morning Sam and Lucas! Here’s your daily digest:\n\n"
+        f"*Crypto Prices:*\n"
+        f"• Bitcoin: {btc_price}\n"
+        f"• Ethereum: {eth_price}\n"
+        f"• S&P 500: {sp500_price}\n\n"
+        f"*Top Headlines Preview:*\n" + "\n".join(preview_lines) + "\n\n"
+        + format_section("iGaming News", igaming_news) + "\n\n"
+        + format_section("PitchBook News", pitchbook_news) + "\n\n"
+        + format_section("CNBC Crypto News", cnbc_news)
     )
     included_titles = [n.title for n in igaming_news + pitchbook_news + cnbc_news]
     return Digest(digest_text, included_titles)
@@ -545,30 +529,16 @@ def send_telegram_message(message: str, chat_id: Optional[str | int] = None) -> 
 def welcome_message() -> str:
     btc, eth, sp500 = fetch_crypto_prices()
     return (
-        "Good Morning Sam and Lucas! 🌅
-
-"
-        "Breaking news in crypto, iGaming, and cap raises will be sent here periodically.
-
-"
-        "*Bot Features:*
-"
-        "• `/start` - Get this welcome message and current market prices
-"
-        "• `/bignews` - Get the latest news immediately
-"
-        "• `/shutup` - Make me quiet for 6 hours
-
-"
-        "*Current Market Prices:*
-"
-        f"• Bitcoin: {btc}
-"
-        f"• Ethereum: {eth}
-"
-        f"• S&P 500: {sp500}
-
-"
+        "Good Morning Sam and Lucas! 🌅\n\n"
+        "Breaking news in crypto, iGaming, and cap raises will be sent here periodically.\n\n"
+        "*Bot Features:*\n"
+        "• `/start` - Get this welcome message and current market prices\n"
+        "• `/bignews` - Get the latest news immediately\n"
+        "• `/shutup` - Make me quiet for 6 hours\n\n"
+        "*Current Market Prices:*\n"
+        f"• Bitcoin: {btc}\n"
+        f"• Ethereum: {eth}\n"
+        f"• S&P 500: {sp500}\n\n"
         "Will update you periodically! 📈"
     )
 
@@ -634,9 +604,7 @@ def telegram_webhook():
             _mark_titles_as_sent(digest.included_titles)
         elif text == '/shutup':
             set_bot_quiet(6)
-            send_telegram_message("My bad Senor and Losh 😅
-
-I'll be quiet for the next 6 hours.", chat_id=chat_id)
+            send_telegram_message("My bad Senor and Losh 😅\n\nI'll be quiet for the next 6 hours.", chat_id=chat_id)
         else:
             send_telegram_message("Unknown command. Try /start, /bignews, or /shutup.", chat_id=chat_id)
     return jsonify({'ok': True})
