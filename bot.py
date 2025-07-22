@@ -457,7 +457,6 @@ def main():
     """Main entry point"""
     try:
         print("🚀 Starting MT Updates Bot...")
-        
         # Start Flask web server in a separate thread
         flask_thread = threading.Thread(target=run_flask, daemon=True)
         flask_thread.start()
@@ -474,6 +473,9 @@ def main():
         # Main loop
         while True:
             try:
+                now_utc = datetime.utcnow()
+                now_pst = datetime.now(pytz.timezone('US/Pacific'))
+                print(f"[DEBUG] UTC now: {now_utc}, PST now: {now_pst}")
                 # Check if it's 9 AM PST for morning digest
                 if is_pst_9am():
                     print("🌅 It's 9 AM PST, sending morning digest...")
