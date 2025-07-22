@@ -246,24 +246,25 @@ def get_all_news():
     return igaming_news + cnbc_news + pitchbook_news
 
 def fetch_crypto_prices():
-    """Fetch BTC, ETH, and S&P 500 prices through web scraping."""
+    """Fetch BTC, ETH, and S&P 500 prices using CoinMarketCap API."""
     try:
-        btc_response = requests.get('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd', headers=headers, timeout=10)
-        eth_response = requests.get('https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd', headers=headers, timeout=10)
-
-        print(f"[DEBUG] BTC status: {btc_response.status_code}, response: {btc_response.text}")
-        print(f"[DEBUG] ETH status: {eth_response.status_code}, response: {eth_response.text}")
-
-        if btc_response.status_code == 200 and eth_response.status_code == 200:
-            btc_data = btc_response.json()
-            eth_data = eth_response.json()
-            btc_price = f"${btc_data['bitcoin']['usd']:,.2f}"
-            eth_price = f"${eth_data['ethereum']['usd']:,.2f}"
+        api_key = os.environ.get('COINMARKETCAP_API_KEY')
+        headers_cmc = {
+            'Accepts': 'application/json',
+            'X-CMC_PRO_API_KEY': api_key,
+        }
+        url = 'https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest'
+        params = {'symbol': 'BTC,ETH', 'convert': 'USD'}
+        response = requests.get(url, headers=headers_cmc, params=params, timeout=10)
+        print(f"[DEBUG] CoinMarketCap status: {response.status_code}, response: {response.text}")
+        if response.status_code == 200:
+            data = response.json()
+            btc_price = f"${data['data']['BTC']['quote']['USD']['price']:,.2f}"
+            eth_price = f"${data['data']['ETH']['quote']['USD']['price']:,.2f}"
         else:
             btc_price = "N/A"
             eth_price = "N/A"
-
-        # For S&P 500, try a simpler approach
+        # S&P 500 code remains the same
         try:
             sp500_response = requests.get('https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC', headers=headers, timeout=10)
             if sp500_response.status_code == 200:
@@ -273,7 +274,6 @@ def fetch_crypto_prices():
                 sp500_price = "N/A"
         except:
             sp500_price = "N/A"
-
         return btc_price, eth_price, sp500_price
     except Exception as e:
         print(f"Error fetching prices: {e}")
