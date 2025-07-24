@@ -15,6 +15,7 @@ from bs4 import BeautifulSoup
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 import pytz
+import feedparser
 
 # ---------------------------------------------------------------------------
 # Environment & Configuration
@@ -372,40 +373,28 @@ def get_cnbc_crypto_news(mark_sent: bool = False) -> List[NewsItem]:
 
 # --- WSJ News ------------------------------------------------------
 def get_wsj_news(mark_sent: bool = False) -> List[NewsItem]:
-    urls = [
-        "https://www.wsj.com/news/types/cryptocurrency",
-        "https://www.wsj.com/news/markets"
+    feeds = [
+        "https://news.google.com/rss/search?q=site:wsj.com+crypto",
+        "https://news.google.com/rss/search?q=site:wsj.com+igaming"
     ]
     news: List[NewsItem] = []
     keywords = {'crypto', 'blockchain', 'bitcoin', 'ethereum', 'igaming', 'gambling', 'casino', 'betting'}
-    for url in urls:
+    for feed_url in feeds:
         try:
-            r = requests.get(url, headers=GENERIC_HEADERS, timeout=REQUEST_TIMEOUT)
-            logger.debug(f"WSJ status for {url}: %s", r.status_code)
-            if not r.ok:
-                logger.warning(f"WSJ request failed for {url}: %s", r.status_code)
-                continue
-            soup = BeautifulSoup(r.text, "html.parser")
-            articles = soup.select("article a")
-            if not articles:
-                articles = soup.select("a")
-            for a in articles:
-                title = a.get_text(strip=True)
-                link = a.get("href", "")
-                if not link or not title:
-                    continue
-                if not link.startswith("http"):
-                    link = f"https://www.wsj.com{link}" if link.startswith("/") else f"https://www.wsj.com/{link}"
+            d = feedparser.parse(feed_url)
+            for entry in d.entries:
+                title = entry.title.strip()
+                link = entry.link.strip()
                 lower = title.lower()
-                if any(k in lower for k in keywords):
+                if any(k in lower for k in keywords) and 'wsj.com' in link:
                     with sent_headlines_lock:
                         if title in sent_headlines:
                             continue
-                    news.append(NewsItem("WSJ", title, link, "📰"))
+                    news.append(NewsItem("WSJ (via Google News)", title, link, "📰"))
                 if len(news) >= 10:
                     break
         except Exception:
-            logger.exception(f"Error fetching WSJ news from {url}")
+            logger.exception(f"Error fetching WSJ Google News RSS from {feed_url}")
             continue
     _maybe_mark_sent(news, mark_sent)
     return news
@@ -413,30 +402,18 @@ def get_wsj_news(mark_sent: bool = False) -> List[NewsItem]:
 
 # --- Medium News ------------------------------------------------------
 def get_medium_news(mark_sent: bool = False) -> List[NewsItem]:
-    urls = [
-        "https://medium.com/tag/crypto",
-        "https://medium.com/tag/igaming"
+    feeds = [
+        "https://medium.com/feed/tag/crypto",
+        "https://medium.com/feed/tag/igaming"
     ]
     news: List[NewsItem] = []
     keywords = {'crypto', 'blockchain', 'bitcoin', 'ethereum', 'igaming', 'gambling', 'casino', 'betting'}
-    for url in urls:
+    for feed_url in feeds:
         try:
-            r = requests.get(url, headers=GENERIC_HEADERS, timeout=REQUEST_TIMEOUT)
-            logger.debug(f"Medium status for {url}: %s", r.status_code)
-            if not r.ok:
-                logger.warning(f"Medium request failed for {url}: %s", r.status_code)
-                continue
-            soup = BeautifulSoup(r.text, "html.parser")
-            articles = soup.select("div.postArticle-content a")
-            if not articles:
-                articles = soup.select("a")
-            for a in articles:
-                title = a.get_text(strip=True)
-                link = a.get("href", "")
-                if not link or not title:
-                    continue
-                if not link.startswith("http"):
-                    link = f"https://medium.com{link}" if link.startswith("/") else f"https://medium.com/{link}"
+            d = feedparser.parse(feed_url)
+            for entry in d.entries:
+                title = entry.title.strip()
+                link = entry.link.strip()
                 lower = title.lower()
                 if any(k in lower for k in keywords):
                     with sent_headlines_lock:
@@ -446,7 +423,7 @@ def get_medium_news(mark_sent: bool = False) -> List[NewsItem]:
                 if len(news) >= 10:
                     break
         except Exception:
-            logger.exception(f"Error fetching Medium news from {url}")
+            logger.exception(f"Error fetching Medium RSS from {feed_url}")
             continue
     _maybe_mark_sent(news, mark_sent)
     return news
@@ -464,7 +441,7 @@ def get_cryptoheadlines_news(mark_sent: bool = False) -> List[NewsItem]:
             logger.warning(f"CryptoHeadlines request failed: %s", r.status_code)
             return []
         soup = BeautifulSoup(r.text, "html.parser")
-        articles = soup.select(".news-list a, .news-item a, a")
+        articles = soup.select(".news-list .news-item a")
         for a in articles:
             title = a.get_text(strip=True)
             link = a.get("href", "")
@@ -499,7 +476,7 @@ def get_defiant_newsletter_news(mark_sent: bool = False) -> List[NewsItem]:
             logger.warning(f"Defiant Newsletter request failed: %s", r.status_code)
             return []
         soup = BeautifulSoup(r.text, "html.parser")
-        articles = soup.select("a.chakra-link, a")
+        articles = soup.select("a.chakra-link[href*='/newsletter/']")
         for a in articles:
             title = a.get_text(strip=True)
             link = a.get("href", "")
