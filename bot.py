@@ -188,19 +188,20 @@ class NewsItem:
 # Fetchers
 # ---------------------------------------------------------------------------
 
-def fetch_crypto_prices() -> Tuple[str, str, str]:
-    btc_price = eth_price = "N/A"
-    sp500_price = "N/A"
+def fetch_crypto_prices() -> Tuple[str, str, str, str, str]:
+    btc_price = eth_price = hype_price = "N/A"
+    sp500_price = gold_price = "N/A"
     if CMC_API_KEY:
         try:
             url = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest"
-            params = {"symbol": "BTC,ETH", "convert": "USD"}
+            params = {"symbol": "BTC,ETH,HYPE", "convert": "USD"}
             resp = cmc_session.get(url, params=params, timeout=REQUEST_TIMEOUT)
             logger.debug("CMC status %s", resp.status_code)
             if resp.ok:
                 data = resp.json()
-                btc_price = f"${data['data']['BTC']['quote']['USD']['price']:,.2f}"
-                eth_price = f"${data['data']['ETH']['quote']['USD']['price']:,.2f}"
+                btc_price = f"${data['data']['BTC']['quote']['USD']['price']:,.2f}" if 'BTC' in data['data'] else "N/A"
+                eth_price = f"${data['data']['ETH']['quote']['USD']['price']:,.2f}" if 'ETH' in data['data'] else "N/A"
+                hype_price = f"${data['data']['HYPE']['quote']['USD']['price']:,.6f}" if 'HYPE' in data['data'] else "N/A"
         except Exception:  # noqa: BLE001
             logger.exception("Error fetching CoinMarketCap prices")
     else:
@@ -212,7 +213,14 @@ def fetch_crypto_prices() -> Tuple[str, str, str]:
             sp500_price = f"${sp_data['chart']['result'][0]['meta']['regularMarketPrice']:,.2f}"
     except Exception:  # noqa: BLE001
         logger.exception("Error fetching S&P 500 price")
-    return btc_price, eth_price, sp500_price
+    try:
+        gold_resp = requests.get("https://query1.finance.yahoo.com/v8/finance/chart/GC=F", headers=GENERIC_HEADERS, timeout=REQUEST_TIMEOUT)
+        if gold_resp.ok:
+            gold_data = gold_resp.json()
+            gold_price = f"${gold_data['chart']['result'][0]['meta']['regularMarketPrice']:,.2f}"
+    except Exception:  # noqa: BLE001
+        logger.exception("Error fetching gold price")
+    return btc_price, eth_price, hype_price, sp500_price, gold_price
 
 
 def _parse_rss_items(xml_bytes: bytes) -> List[dict]:
@@ -362,6 +370,158 @@ def get_cnbc_crypto_news(mark_sent: bool = False) -> List[NewsItem]:
     return news
 
 
+# --- WSJ News ------------------------------------------------------
+def get_wsj_news(mark_sent: bool = False) -> List[NewsItem]:
+    urls = [
+        "https://www.wsj.com/news/types/cryptocurrency",
+        "https://www.wsj.com/news/markets"
+    ]
+    news: List[NewsItem] = []
+    keywords = {'crypto', 'blockchain', 'bitcoin', 'ethereum', 'igaming', 'gambling', 'casino', 'betting'}
+    for url in urls:
+        try:
+            r = requests.get(url, headers=GENERIC_HEADERS, timeout=REQUEST_TIMEOUT)
+            logger.debug(f"WSJ status for {url}: %s", r.status_code)
+            if not r.ok:
+                logger.warning(f"WSJ request failed for {url}: %s", r.status_code)
+                continue
+            soup = BeautifulSoup(r.text, "html.parser")
+            articles = soup.select("article a")
+            if not articles:
+                articles = soup.select("a")
+            for a in articles:
+                title = a.get_text(strip=True)
+                link = a.get("href", "")
+                if not link or not title:
+                    continue
+                if not link.startswith("http"):
+                    link = f"https://www.wsj.com{link}" if link.startswith("/") else f"https://www.wsj.com/{link}"
+                lower = title.lower()
+                if any(k in lower for k in keywords):
+                    with sent_headlines_lock:
+                        if title in sent_headlines:
+                            continue
+                    news.append(NewsItem("WSJ", title, link, "📰"))
+                if len(news) >= 10:
+                    break
+        except Exception:
+            logger.exception(f"Error fetching WSJ news from {url}")
+            continue
+    _maybe_mark_sent(news, mark_sent)
+    return news
+
+
+# --- Medium News ------------------------------------------------------
+def get_medium_news(mark_sent: bool = False) -> List[NewsItem]:
+    urls = [
+        "https://medium.com/tag/crypto",
+        "https://medium.com/tag/igaming"
+    ]
+    news: List[NewsItem] = []
+    keywords = {'crypto', 'blockchain', 'bitcoin', 'ethereum', 'igaming', 'gambling', 'casino', 'betting'}
+    for url in urls:
+        try:
+            r = requests.get(url, headers=GENERIC_HEADERS, timeout=REQUEST_TIMEOUT)
+            logger.debug(f"Medium status for {url}: %s", r.status_code)
+            if not r.ok:
+                logger.warning(f"Medium request failed for {url}: %s", r.status_code)
+                continue
+            soup = BeautifulSoup(r.text, "html.parser")
+            articles = soup.select("div.postArticle-content a")
+            if not articles:
+                articles = soup.select("a")
+            for a in articles:
+                title = a.get_text(strip=True)
+                link = a.get("href", "")
+                if not link or not title:
+                    continue
+                if not link.startswith("http"):
+                    link = f"https://medium.com{link}" if link.startswith("/") else f"https://medium.com/{link}"
+                lower = title.lower()
+                if any(k in lower for k in keywords):
+                    with sent_headlines_lock:
+                        if title in sent_headlines:
+                            continue
+                    news.append(NewsItem("Medium", title, link, "✍️"))
+                if len(news) >= 10:
+                    break
+        except Exception:
+            logger.exception(f"Error fetching Medium news from {url}")
+            continue
+    _maybe_mark_sent(news, mark_sent)
+    return news
+
+
+# --- CryptoHeadlines News ------------------------------------------------------
+def get_cryptoheadlines_news(mark_sent: bool = False) -> List[NewsItem]:
+    url = "https://cryptoheadlines.com/"
+    news: List[NewsItem] = []
+    keywords = {'crypto', 'blockchain', 'bitcoin', 'ethereum', 'igaming', 'gambling', 'casino', 'betting'}
+    try:
+        r = requests.get(url, headers=GENERIC_HEADERS, timeout=REQUEST_TIMEOUT)
+        logger.debug(f"CryptoHeadlines status: %s", r.status_code)
+        if not r.ok:
+            logger.warning(f"CryptoHeadlines request failed: %s", r.status_code)
+            return []
+        soup = BeautifulSoup(r.text, "html.parser")
+        articles = soup.select(".news-list a, .news-item a, a")
+        for a in articles:
+            title = a.get_text(strip=True)
+            link = a.get("href", "")
+            if not link or not title:
+                continue
+            if not link.startswith("http"):
+                link = f"https://cryptoheadlines.com{link}" if link.startswith("/") else f"https://cryptoheadlines.com/{link}"
+            lower = title.lower()
+            if any(k in lower for k in keywords):
+                with sent_headlines_lock:
+                    if title in sent_headlines:
+                        continue
+                news.append(NewsItem("CryptoHeadlines", title, link, "📰"))
+            if len(news) >= 10:
+                break
+    except Exception:
+        logger.exception(f"Error fetching CryptoHeadlines news")
+        return []
+    _maybe_mark_sent(news, mark_sent)
+    return news
+
+
+# --- The Defiant Newsletter News ------------------------------------------------------
+def get_defiant_newsletter_news(mark_sent: bool = False) -> List[NewsItem]:
+    url = "https://thedefiant.io/newsletter/"
+    news: List[NewsItem] = []
+    keywords = {'crypto', 'blockchain', 'bitcoin', 'ethereum', 'igaming', 'gambling', 'casino', 'betting'}
+    try:
+        r = requests.get(url, headers=GENERIC_HEADERS, timeout=REQUEST_TIMEOUT)
+        logger.debug(f"Defiant Newsletter status: %s", r.status_code)
+        if not r.ok:
+            logger.warning(f"Defiant Newsletter request failed: %s", r.status_code)
+            return []
+        soup = BeautifulSoup(r.text, "html.parser")
+        articles = soup.select("a.chakra-link, a")
+        for a in articles:
+            title = a.get_text(strip=True)
+            link = a.get("href", "")
+            if not link or not title:
+                continue
+            if not link.startswith("http"):
+                link = f"https://thedefiant.io{link}" if link.startswith("/") else f"https://thedefiant.io/{link}"
+            lower = title.lower()
+            if any(k in lower for k in keywords):
+                with sent_headlines_lock:
+                    if title in sent_headlines:
+                        continue
+                news.append(NewsItem("The Defiant Newsletter", title, link, "📰"))
+            if len(news) >= 10:
+                break
+    except Exception:
+        logger.exception(f"Error fetching Defiant Newsletter news")
+        return []
+    _maybe_mark_sent(news, mark_sent)
+    return news
+
+
 # ---------------------------------------------------------------------------
 # Sent-headlines marking helper
 # ---------------------------------------------------------------------------
@@ -401,38 +561,44 @@ class Digest:
 
 
 def build_digest() -> Digest:
-    btc_price, eth_price, sp500_price = fetch_crypto_prices()
+    btc_price, eth_price, hype_price, sp500_price, gold_price = fetch_crypto_prices()
     igaming_news_all = get_igaming_news(mark_sent=False)
     cnbc_news_all = get_cnbc_crypto_news(mark_sent=False)
     crunchbase_news_all = get_crunchbase_news(mark_sent=False)
+    wsj_news_all = get_wsj_news(mark_sent=False)
+    medium_news_all = get_medium_news(mark_sent=False)
+    cryptoheadlines_news_all = get_cryptoheadlines_news(mark_sent=False)
+    defiant_news_all = get_defiant_newsletter_news(mark_sent=False)
     with sent_headlines_lock:
         sent_copy = set(sent_headlines)
     igaming_news = [n for n in igaming_news_all if n.title not in sent_copy]
     cnbc_news = [n for n in cnbc_news_all if n.title not in sent_copy]
     crunchbase_news = [n for n in crunchbase_news_all if n.title not in sent_copy]
-    preview_lines = []
-    if igaming_news:
-        preview_lines.append(f"iGaming: {md_escape(igaming_news[0].title)}")
-    if crunchbase_news:
-        preview_lines.append(f"Crunchbase: {md_escape(crunchbase_news[0].title)}")
-    if not preview_lines:
-        preview_lines.append("No top headlines today.")
+    wsj_news = [n for n in wsj_news_all if n.title not in sent_copy]
+    medium_news = [n for n in medium_news_all if n.title not in sent_copy]
+    cryptoheadlines_news = [n for n in cryptoheadlines_news_all if n.title not in sent_copy]
+    defiant_news = [n for n in defiant_news_all if n.title not in sent_copy]
     def format_section(title: str, items: List[NewsItem]) -> str:
         if items:
-            return f"*{md_escape(title)}:*\n" + "\n".join(i.to_markdown_line() for i in items)
+            return f"*{md_escape(title)}:*\n" + "\n".join(f"{i+1}. [{md_escape(item.title)}]({item.url})" for i, item in enumerate(items))
         return f"*{md_escape(title)}:*\n_No pertinent news_"
     digest_text = (
         "🌅 Good Morning Sam and Lucas! Here’s your daily digest:\n\n"
         f"*Market Outlook:*\n"
         f"• Bitcoin: {btc_price}\n"
         f"• Ethereum: {eth_price}\n"
+        f"• $HYPE: {hype_price}\n"
+        f"• Gold: {gold_price}\n"
         f"• S&P 500: {sp500_price}\n\n"
-        f"*Top Headlines Preview:*\n" + "\n".join(preview_lines) + "\n\n"
         + format_section("iGaming News", igaming_news) + "\n\n"
         + format_section("Crunchbase News", crunchbase_news) + "\n\n"
-        + format_section("CNBC Crypto News", cnbc_news)
+        + format_section("CNBC Crypto News", cnbc_news) + "\n\n"
+        + format_section("WSJ News", wsj_news) + "\n\n"
+        + format_section("Medium News", medium_news) + "\n\n"
+        + format_section("CryptoHeadlines News", cryptoheadlines_news) + "\n\n"
+        + format_section("The Defiant Newsletter", defiant_news)
     )
-    included_titles = [n.title for n in igaming_news + crunchbase_news + cnbc_news]
+    included_titles = [n.title for n in igaming_news + crunchbase_news + cnbc_news + wsj_news + medium_news + cryptoheadlines_news + defiant_news]
     return Digest(digest_text, included_titles)
 
 
@@ -460,7 +626,7 @@ def send_telegram_message(message: str, chat_id: Optional[str | int] = None) -> 
 
 
 def welcome_message() -> str:
-    btc, eth, sp500 = fetch_crypto_prices()
+    btc, eth, hype, sp500, gold = fetch_crypto_prices()
     return (
         "Good Morning Sam and Lucas! 🌅\n\n"
         "Breaking news in crypto, iGaming, and cap raises will be sent here periodically.\n\n"
@@ -471,6 +637,8 @@ def welcome_message() -> str:
         "*Market Outlook:*\n"
         f"• Bitcoin: {btc}\n"
         f"• Ethereum: {eth}\n"
+        f"• $HYPE: {hype}\n"
+        f"• Gold: {gold}\n"
         f"• S&P 500: {sp500}\n\n"
         "Will update you periodically! 📈"
     )
@@ -572,7 +740,11 @@ def post_news() -> None:
         igaming = get_igaming_news(mark_sent=False)
         cnbc = get_cnbc_crypto_news(mark_sent=False)
         crunchbase = get_crunchbase_news(mark_sent=False)
-        logger.info("Hourly fetch: %d iGaming, %d CNBC, %d Crunchbase (unfiltered).", len(igaming), len(cnbc), len(crunchbase))
+        wsj = get_wsj_news(mark_sent=False)
+        medium = get_medium_news(mark_sent=False)
+        cryptoheadlines = get_cryptoheadlines_news(mark_sent=False)
+        defiant = get_defiant_newsletter_news(mark_sent=False)
+        logger.info("Hourly fetch: %d iGaming, %d CNBC, %d Crunchbase, %d WSJ, %d Medium, %d CryptoHeadlines, %d Defiant (unfiltered).", len(igaming), len(cnbc), len(crunchbase), len(wsj), len(medium), len(cryptoheadlines), len(defiant))
     except Exception:  # noqa: BLE001
         logger.exception("Error in post_news")
 
