@@ -330,6 +330,38 @@ def get_crunchbase_news(mark_sent: bool = False) -> List[NewsItem]:
     return news
 
 
+# --- CNBC Crypto News ------------------------------------------------------
+def get_cnbc_crypto_news(mark_sent: bool = False) -> List[NewsItem]:
+    url = "https://www.cnbc.com/cryptoworld/"
+    news: List[NewsItem] = []
+    try:
+        r = cnbc_session.get(url, timeout=REQUEST_TIMEOUT)
+        logger.debug("CNBC status: %s", r.status_code)
+        if not r.ok:
+            logger.warning("CNBC request failed: %s", r.status_code)
+            return []
+        soup = BeautifulSoup(r.text, "html.parser")
+        anchors = soup.select("a.Card-title")
+        if not anchors:
+            anchors = [a for a in soup.select("a") if 'crypto' in (a.get('href') or '')]
+        for a in anchors[:15]:
+            title = a.get_text(strip=True)
+            link = a.get("href", "")
+            if not link:
+                continue
+            if link.startswith('/'):
+                link = f"https://www.cnbc.com{link}"
+            with sent_headlines_lock:
+                if title in sent_headlines:
+                    continue
+            news.append(NewsItem("CNBC Crypto World", title, link, "💰"))
+    except Exception:  # noqa: BLE001
+        logger.exception("Error fetching CNBC crypto news")
+        return []
+    _maybe_mark_sent(news, mark_sent)
+    return news
+
+
 # ---------------------------------------------------------------------------
 # Sent-headlines marking helper
 # ---------------------------------------------------------------------------
