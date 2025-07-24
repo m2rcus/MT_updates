@@ -159,6 +159,7 @@ GENERIC_HEADERS = {
 IGAMING_HEADERS = {**GENERIC_HEADERS, "Accept": "application/rss+xml,application/xml;q=0.9,*/*;q=0.8", "Referer": "https://www.google.com/"}
 PITCHBOOK_HEADERS = {**GENERIC_HEADERS, "Accept": "application/rss+xml,application/xml;q=0.9,*/*;q=0.8", "Referer": "https://www.google.com/"}
 CNBC_HEADERS = GENERIC_HEADERS.copy()
+CRUNCHBASE_HEADERS = GENERIC_HEADERS.copy()
 
 REQUEST_TIMEOUT = 15
 
@@ -166,6 +167,7 @@ igaming_session = build_session(IGAMING_HEADERS)
 pitchbook_session = build_session(PITCHBOOK_HEADERS)
 cnbc_session = build_session(CNBC_HEADERS)
 cmc_session = build_session({"Accepts": "application/json", "X-CMC_PRO_API_KEY": CMC_API_KEY or ""})
+crunchbase_session = build_session(CRUNCHBASE_HEADERS)
 
 
 # ---------------------------------------------------------------------------
@@ -289,141 +291,40 @@ def get_igaming_news(mark_sent: bool = False) -> List[NewsItem]:
     return news
 
 
-def _pitchbook_fallback() -> List[NewsItem]:
-    url = "https://api.rss2json.com/v1/api.json?rss_url=https://pitchbook.com/news/rss"
+# --- Crunchbase News ------------------------------------------------------
+def get_crunchbase_news(mark_sent: bool = False) -> List[NewsItem]:
+    url = "https://news.crunchbase.com/"
+    news: List[NewsItem] = []
+    keywords = {'crypto', 'blockchain', 'bitcoin', 'ethereum', 'igaming', 'gambling', 'casino', 'betting'}
     try:
-        r = requests.get(url, headers=GENERIC_HEADERS, timeout=REQUEST_TIMEOUT)
+        r = crunchbase_session.get(url, timeout=REQUEST_TIMEOUT)
+        logger.debug("Crunchbase status: %s", r.status_code)
         if not r.ok:
-            logger.warning("PitchBook fallback rss2json failed: %s", r.status_code)
+            logger.warning("Crunchbase request failed: %s", r.status_code)
             return []
-        data = r.json()
-        items = data.get("items", [])
-        news = []
-        for item in items[:10]:
-            title = item.get("title", "").strip()
-            link = item.get("link", "").strip()
-            if not title or not link:
-                continue
-            with sent_headlines_lock:
-                if title in sent_headlines:
-                    continue
-            news.append(NewsItem("PitchBook Cap Raise", title, link, "🚀"))
-        return news
-    except Exception:  # noqa: BLE001
-        logger.exception("PitchBook fallback error")
-        return []
-
-
-def _pitchbook_html_fallback() -> List[NewsItem]:
-    global _pitchbook_next_html_try
-    with _pitchbook_fail_ts_lock:
-        now = time.time()
-        if _pitchbook_next_html_try and now < _pitchbook_next_html_try:
-            logger.debug("Skipping HTML fallback (throttled)")
-            return []
-        _pitchbook_next_html_try = now + 600
-    url = "https://pitchbook.com/news"
-    try:
-        r = pitchbook_session.get(url, timeout=REQUEST_TIMEOUT)
-        if not r.ok:
-            logger.warning("PitchBook HTML fallback failed: %s", r.status_code)
-            return []
-        soup = BeautifulSoup(r.text, 'html.parser')
-        cards = soup.select('a.news-article-card, a.card, article a') or soup.select('a')
-        keywords = {'crypto','blockchain','igaming','gambling'}
-        raise_terms = {'raise','funding','investment','seed','series a','series b','venture','capital'}
-        results: List[NewsItem] = []
-        for a in cards:
+        soup = BeautifulSoup(r.text, "html.parser")
+        # Main selector for Crunchbase headlines
+        articles = soup.select("article h2 a")
+        if not articles:
+            # Fallback: try all links in articles
+            articles = soup.select("article a")
+        for a in articles:
             title = a.get_text(strip=True)
-            link = a.get('href') or ''
-            if not title or not link:
+            link = a.get("href", "")
+            if not link or not title:
                 continue
-            if link.startswith('/'):
-                link = f'https://pitchbook.com{link}'
+            if not link.startswith("http"):
+                link = f"https://news.crunchbase.com{link}" if link.startswith("/") else f"https://news.crunchbase.com/{link}"
             lower = title.lower()
-            if any(k in lower for k in keywords) and any(t in lower for t in raise_terms):
+            if any(k in lower for k in keywords):
                 with sent_headlines_lock:
                     if title in sent_headlines:
                         continue
-                results.append(NewsItem('PitchBook Cap Raise', title, link, '🚀'))
-            if len(results) >= 10:
+                news.append(NewsItem("Crunchbase News", title, link, "🦀"))
+            if len(news) >= 10:
                 break
-        if results:
-            logger.info('PitchBook HTML fallback recovered %d items.', len(results))
-        return results
     except Exception:  # noqa: BLE001
-        logger.exception('PitchBook HTML fallback error')
-        return []
-
-
-def get_pitchbook_cap_raises(mark_sent: bool = False) -> List[NewsItem]:
-    url = "https://pitchbook.com/news/rss"
-    news: List[NewsItem] = []
-    try:
-        r = pitchbook_session.get(url, timeout=REQUEST_TIMEOUT)
-        logger.debug("PitchBook RSS status: %s", r.status_code)
-        if r.status_code == 403:
-            logger.warning("PitchBook RSS 403; trying rss2json fallback")
-            news = _pitchbook_fallback()
-            if not news:
-                news = _pitchbook_html_fallback()
-            _maybe_mark_sent(news, mark_sent)
-            return news
-        if not r.ok:
-            logger.warning("PitchBook RSS request failed: %s", r.status_code)
-            news = _pitchbook_fallback()
-            if not news:
-                news = _pitchbook_html_fallback()
-            _maybe_mark_sent(news, mark_sent)
-            return news
-        articles = _parse_rss_items(r.content)
-    except Exception:  # noqa: BLE001
-        logger.exception("Error fetching PitchBook RSS; attempting fallback")
-        news = _pitchbook_fallback()
-        if not news:
-            news = _pitchbook_html_fallback()
-        _maybe_mark_sent(news, mark_sent)
-        return news
-    keywords = {'crypto','blockchain','igaming','gambling'}
-    raise_terms = {'raise','funding','investment','seed','series a','series b','venture','capital'}
-    for art in articles[:10]:
-        title, link = art['title'], art['link']
-        lower = title.lower()
-        if any(k in lower for k in keywords) and any(t in lower for t in raise_terms):
-            with sent_headlines_lock:
-                if title in sent_headlines:
-                    continue
-            news.append(NewsItem("PitchBook Cap Raise", title, link, "🚀"))
-    _maybe_mark_sent(news, mark_sent)
-    return news
-
-
-def get_cnbc_crypto_news(mark_sent: bool = False) -> List[NewsItem]:
-    url = "https://www.cnbc.com/cryptoworld/"
-    news: List[NewsItem] = []
-    try:
-        r = cnbc_session.get(url, timeout=REQUEST_TIMEOUT)
-        logger.debug("CNBC status: %s", r.status_code)
-        if not r.ok:
-            logger.warning("CNBC request failed: %s", r.status_code)
-            return []
-        soup = BeautifulSoup(r.text, "html.parser")
-        anchors = soup.select("a.Card-title")
-        if not anchors:
-            anchors = [a for a in soup.select("a") if 'crypto' in (a.get('href') or '')]
-        for a in anchors[:15]:
-            title = a.get_text(strip=True)
-            link = a.get("href", "")
-            if not link:
-                continue
-            if link.startswith('/'):
-                link = f"https://www.cnbc.com{link}"
-            with sent_headlines_lock:
-                if title in sent_headlines:
-                    continue
-            news.append(NewsItem("CNBC Crypto World", title, link, "💰"))
-    except Exception:  # noqa: BLE001
-        logger.exception("Error fetching CNBC crypto news")
+        logger.exception("Error fetching Crunchbase news")
         return []
     _maybe_mark_sent(news, mark_sent)
     return news
@@ -471,17 +372,17 @@ def build_digest() -> Digest:
     btc_price, eth_price, sp500_price = fetch_crypto_prices()
     igaming_news_all = get_igaming_news(mark_sent=False)
     cnbc_news_all = get_cnbc_crypto_news(mark_sent=False)
-    pitchbook_news_all = get_pitchbook_cap_raises(mark_sent=False)
+    crunchbase_news_all = get_crunchbase_news(mark_sent=False)
     with sent_headlines_lock:
         sent_copy = set(sent_headlines)
     igaming_news = [n for n in igaming_news_all if n.title not in sent_copy]
     cnbc_news = [n for n in cnbc_news_all if n.title not in sent_copy]
-    pitchbook_news = [n for n in pitchbook_news_all if n.title not in sent_copy]
+    crunchbase_news = [n for n in crunchbase_news_all if n.title not in sent_copy]
     preview_lines = []
     if igaming_news:
         preview_lines.append(f"iGaming: {md_escape(igaming_news[0].title)}")
-    if pitchbook_news:
-        preview_lines.append(f"PitchBook: {md_escape(pitchbook_news[0].title)}")
+    if crunchbase_news:
+        preview_lines.append(f"Crunchbase: {md_escape(crunchbase_news[0].title)}")
     if not preview_lines:
         preview_lines.append("No top headlines today.")
     def format_section(title: str, items: List[NewsItem]) -> str:
@@ -490,16 +391,16 @@ def build_digest() -> Digest:
         return f"*{md_escape(title)}:*\n_No pertinent news_"
     digest_text = (
         "🌅 Good Morning Sam and Lucas! Here’s your daily digest:\n\n"
-        f"*Crypto Prices:*\n"
+        f"*Market Outlook:*\n"
         f"• Bitcoin: {btc_price}\n"
         f"• Ethereum: {eth_price}\n"
         f"• S&P 500: {sp500_price}\n\n"
         f"*Top Headlines Preview:*\n" + "\n".join(preview_lines) + "\n\n"
         + format_section("iGaming News", igaming_news) + "\n\n"
-        + format_section("PitchBook News", pitchbook_news) + "\n\n"
+        + format_section("Crunchbase News", crunchbase_news) + "\n\n"
         + format_section("CNBC Crypto News", cnbc_news)
     )
-    included_titles = [n.title for n in igaming_news + pitchbook_news + cnbc_news]
+    included_titles = [n.title for n in igaming_news + crunchbase_news + cnbc_news]
     return Digest(digest_text, included_titles)
 
 
@@ -535,7 +436,7 @@ def welcome_message() -> str:
         "• `/start` - Get this welcome message and current market prices\n"
         "• `/bignews` - Get the latest news immediately\n"
         "• `/shutup` - Make me quiet for 6 hours\n\n"
-        "*Current Market Prices:*\n"
+        "*Market Outlook:*\n"
         f"• Bitcoin: {btc}\n"
         f"• Ethereum: {eth}\n"
         f"• S&P 500: {sp500}\n\n"
@@ -638,8 +539,8 @@ def post_news() -> None:
     try:
         igaming = get_igaming_news(mark_sent=False)
         cnbc = get_cnbc_crypto_news(mark_sent=False)
-        pitch = get_pitchbook_cap_raises(mark_sent=False)
-        logger.info("Hourly fetch: %d iGaming, %d CNBC, %d PitchBook (unfiltered).", len(igaming), len(cnbc), len(pitch))
+        crunchbase = get_crunchbase_news(mark_sent=False)
+        logger.info("Hourly fetch: %d iGaming, %d CNBC, %d Crunchbase (unfiltered).", len(igaming), len(cnbc), len(crunchbase))
     except Exception:  # noqa: BLE001
         logger.exception("Error in post_news")
 
