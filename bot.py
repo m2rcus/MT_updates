@@ -189,9 +189,9 @@ class NewsItem:
 # Fetchers
 # ---------------------------------------------------------------------------
 
-def fetch_crypto_prices() -> Tuple[str, str, str, str, str]:
+def fetch_crypto_prices() -> Tuple[str, str, str, str, str, str]:
     btc_price = eth_price = hype_price = "N/A"
-    sp500_price = gold_price = "N/A"
+    sp500_price = gold_price = titan_price = "N/A"
     if CMC_API_KEY:
         try:
             url = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest"
@@ -200,9 +200,9 @@ def fetch_crypto_prices() -> Tuple[str, str, str, str, str]:
             logger.debug("CMC status %s", resp.status_code)
             if resp.ok:
                 data = resp.json()
-                btc_price = f"${data['data']['BTC']['quote']['USD']['price']:,.2f}" if 'BTC' in data['data'] else "N/A"
-                eth_price = f"${data['data']['ETH']['quote']['USD']['price']:,.2f}" if 'ETH' in data['data'] else "N/A"
-                hype_price = f"${data['data']['HYPE']['quote']['USD']['price']:,.6f}" if 'HYPE' in data['data'] else "N/A"
+                btc_price = f"${data['data']['BTC']['quote']['USD']['price']:,.0f}" if 'BTC' in data['data'] else "N/A"
+                eth_price = f"${data['data']['ETH']['quote']['USD']['price']:,.0f}" if 'ETH' in data['data'] else "N/A"
+                hype_price = f"${data['data']['HYPE']['quote']['USD']['price']:,.2f}" if 'HYPE' in data['data'] else "N/A"
         except Exception:  # noqa: BLE001
             logger.exception("Error fetching CoinMarketCap prices")
     else:
@@ -211,17 +211,24 @@ def fetch_crypto_prices() -> Tuple[str, str, str, str, str]:
         sp_resp = requests.get("https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC", headers=GENERIC_HEADERS, timeout=REQUEST_TIMEOUT)
         if sp_resp.ok:
             sp_data = sp_resp.json()
-            sp500_price = f"${sp_data['chart']['result'][0]['meta']['regularMarketPrice']:,.2f}"
+            sp500_price = f"${sp_data['chart']['result'][0]['meta']['regularMarketPrice']:,.0f}"
     except Exception:  # noqa: BLE001
         logger.exception("Error fetching S&P 500 price")
     try:
         gold_resp = requests.get("https://query1.finance.yahoo.com/v8/finance/chart/GC=F", headers=GENERIC_HEADERS, timeout=REQUEST_TIMEOUT)
         if gold_resp.ok:
             gold_data = gold_resp.json()
-            gold_price = f"${gold_data['chart']['result'][0]['meta']['regularMarketPrice']:,.2f}"
+            gold_price = f"${gold_data['chart']['result'][0]['meta']['regularMarketPrice']:,.0f}"
     except Exception:  # noqa: BLE001
         logger.exception("Error fetching gold price")
-    return btc_price, eth_price, hype_price, sp500_price, gold_price
+    try:
+        titan_resp = requests.get("https://query1.finance.yahoo.com/v8/finance/chart/TTTNF", headers=GENERIC_HEADERS, timeout=REQUEST_TIMEOUT)
+        if titan_resp.ok:
+            titan_data = titan_resp.json()
+            titan_price = f"${titan_data['chart']['result'][0]['meta']['regularMarketPrice']:,.2f}"
+    except Exception:  # noqa: BLE001
+        logger.exception("Error fetching Titan Minerals price")
+    return btc_price, eth_price, hype_price, sp500_price, gold_price, titan_price
 
 
 def _parse_rss_items(xml_bytes: bytes) -> List[dict]:
@@ -499,6 +506,98 @@ def get_defiant_newsletter_news(mark_sent: bool = False) -> List[NewsItem]:
     return news
 
 
+# --- Ecuador Mining & Gold Assets News ------------------------------------------------------
+def _ecuador_mining_fallback() -> List[NewsItem]:
+    """Fallback for Ecuador mining news using alternative sources"""
+    fallback_urls = [
+        "https://api.rss2json.com/v1/api.json?rss_url=https://feeds.reuters.com/reuters/businessNews",
+        "https://api.rss2json.com/v1/api.json?rss_url=https://feeds.bloomberg.com/markets/news.rss",
+        "https://api.rss2json.com/v1/api.json?rss_url=https://www.ambito.com/rss/economia.xml",
+        "https://api.rss2json.com/v1/api.json?rss_url=https://www.infobae.com/feed/economia/",
+        "https://api.rss2json.com/v1/api.json?rss_url=https://www.lanacion.com.ar/rss/economia.xml",
+        "https://api.rss2json.com/v1/api.json?rss_url=https://www.elcomercio.com/rss/economia.xml",
+        "https://api.rss2json.com/v1/api.json?rss_url=https://www.eluniverso.com/rss/economia.xml"
+    ]
+    news: List[NewsItem] = []
+    keywords = {'ecuador', 'mining', 'gold', 'copper', 'silver', 'mineral', 'exploration', 'drill', 'assay', 'resource', 'reserve', 'production', 'development', 'permit', 'concession', 'titan minerals', 'tttnf'}
+    
+    for fallback_url in fallback_urls:
+        try:
+            r = requests.get(fallback_url, headers=GENERIC_HEADERS, timeout=REQUEST_TIMEOUT)
+            if not r.ok:
+                continue
+            data = r.json()
+            items = data.get("items", [])
+            
+            for item in items[:15]:
+                title = item.get("title", "").strip()
+                link = item.get("link", "").strip()
+                if not title or not link:
+                    continue
+                lower = title.lower()
+                if 'ecuador' in lower and any(k in lower for k in keywords):
+                    with sent_headlines_lock:
+                        if title in sent_headlines:
+                            continue
+                    news.append(NewsItem("Ecuador Mining News (Fallback)", title, link, "⛏️"))
+                if len(news) >= 5:
+                    break
+            if news:
+                break
+        except Exception:
+            continue
+    return news
+
+
+def get_ecuador_mining_news(mark_sent: bool = False) -> List[NewsItem]:
+    feeds = [
+        "https://news.google.com/rss/search?q=ecuador+mining+gold",
+        "https://news.google.com/rss/search?q=ecuador+gold+mines",
+        "https://news.google.com/rss/search?q=ecuador+mining+companies",
+        "https://news.google.com/rss/search?q=site:elcomercio.com+ecuador+mining",
+        "https://news.google.com/rss/search?q=site:eluniverso.com+ecuador+mining",
+        "https://news.google.com/rss/search?q=site:expreso.ec+ecuador+mining",
+        "https://news.google.com/rss/search?q=site:primicias.ec+ecuador+mining",
+        "https://news.google.com/rss/search?q=site:eltelegrafo.com.ec+ecuador+mining",
+        "https://news.google.com/rss/search?q=site:diarioextra.com+ecuador+mining",
+        "https://news.google.com/rss/search?q=site:lahora.com.ec+ecuador+mining"
+    ]
+    news: List[NewsItem] = []
+    keywords = {'ecuador', 'mining', 'gold', 'copper', 'silver', 'mineral', 'exploration', 'drill', 'assay', 'resource', 'reserve', 'production', 'development', 'permit', 'concession', 'titan minerals', 'tttnf', 'australian mining', 'canadian mining'}
+    
+    # Try primary Google News feeds
+    for feed_url in feeds:
+        try:
+            d = feedparser.parse(feed_url)
+            for entry in d.entries:
+                title = entry.title.strip()
+                link = entry.link.strip()
+                lower = title.lower()
+                if 'ecuador' in lower and any(k in lower for k in keywords):
+                    with sent_headlines_lock:
+                        if title in sent_headlines:
+                            continue
+                    news.append(NewsItem("Ecuador Mining News", title, link, "⛏️"))
+                if len(news) >= 8:
+                    break
+            if len(news) >= 5:  # If we got some news, break early
+                break
+        except Exception:
+            logger.exception(f"Error fetching Ecuador mining news from {feed_url}")
+            continue
+    
+    # If primary sources failed, try fallback
+    if not news:
+        logger.warning("Primary Ecuador mining sources failed, trying fallback")
+        news = _ecuador_mining_fallback()
+    
+    _maybe_mark_sent(news, mark_sent)
+    return news
+
+
+
+
+
 # ---------------------------------------------------------------------------
 # Sent-headlines marking helper
 # ---------------------------------------------------------------------------
@@ -538,7 +637,7 @@ class Digest:
 
 
 def build_digest() -> Digest:
-    btc_price, eth_price, hype_price, sp500_price, gold_price = fetch_crypto_prices()
+    btc_price, eth_price, hype_price, sp500_price, gold_price, titan_price = fetch_crypto_prices()
     igaming_news_all = get_igaming_news(mark_sent=False)
     cnbc_news_all = get_cnbc_crypto_news(mark_sent=False)
     crunchbase_news_all = get_crunchbase_news(mark_sent=False)
@@ -546,6 +645,7 @@ def build_digest() -> Digest:
     medium_news_all = get_medium_news(mark_sent=False)
     cryptoheadlines_news_all = get_cryptoheadlines_news(mark_sent=False)
     defiant_news_all = get_defiant_newsletter_news(mark_sent=False)
+    ecuador_mining_news_all = get_ecuador_mining_news(mark_sent=False)
     with sent_headlines_lock:
         sent_copy = set(sent_headlines)
     igaming_news = [n for n in igaming_news_all if n.title not in sent_copy]
@@ -555,27 +655,30 @@ def build_digest() -> Digest:
     medium_news = [n for n in medium_news_all if n.title not in sent_copy]
     cryptoheadlines_news = [n for n in cryptoheadlines_news_all if n.title not in sent_copy]
     defiant_news = [n for n in defiant_news_all if n.title not in sent_copy]
+    ecuador_mining_news = [n for n in ecuador_mining_news_all if n.title not in sent_copy]
     def format_section(title: str, items: List[NewsItem]) -> str:
         if items:
             return f"*{md_escape(title)}:*\n" + "\n".join(f"{i+1}. [{md_escape(item.title)}]({item.url})" for i, item in enumerate(items))
         return f"*{md_escape(title)}:*\n_No pertinent news_"
     digest_text = (
-        "🌅 Good Morning Sam and Lucas! Here’s your daily digest:\n\n"
+        "🌅 Good Morning Sam and Lucas! Here's your daily digest:\n\n"
         f"*Market Outlook:*\n"
         f"• Bitcoin: {btc_price}\n"
         f"• Ethereum: {eth_price}\n"
         f"• $HYPE: {hype_price}\n"
         f"• Gold: {gold_price}\n"
-        f"• S&P 500: {sp500_price}\n\n"
+        f"• S&P 500: {sp500_price}\n"
+        f"• Titan Minerals: {titan_price}\n\n"
         + format_section("iGaming News", igaming_news) + "\n\n"
         + format_section("Crunchbase News", crunchbase_news) + "\n\n"
         + format_section("CNBC Crypto News", cnbc_news) + "\n\n"
         + format_section("WSJ News", wsj_news) + "\n\n"
         + format_section("Medium News", medium_news) + "\n\n"
         + format_section("CryptoHeadlines News", cryptoheadlines_news) + "\n\n"
-        + format_section("The Defiant Newsletter", defiant_news)
+        + format_section("The Defiant Newsletter", defiant_news) + "\n\n"
+        + format_section("Ecuador Mining & Gold News", ecuador_mining_news)
     )
-    included_titles = [n.title for n in igaming_news + crunchbase_news + cnbc_news + wsj_news + medium_news + cryptoheadlines_news + defiant_news]
+    included_titles = [n.title for n in igaming_news + crunchbase_news + cnbc_news + wsj_news + medium_news + cryptoheadlines_news + defiant_news + ecuador_mining_news]
     return Digest(digest_text, included_titles)
 
 
@@ -603,7 +706,7 @@ def send_telegram_message(message: str, chat_id: Optional[str | int] = None) -> 
 
 
 def welcome_message() -> str:
-    btc, eth, hype, sp500, gold = fetch_crypto_prices()
+    btc, eth, hype, sp500, gold, titan = fetch_crypto_prices()
     return (
         "Good Morning Sam and Lucas! 🌅\n\n"
         "Breaking news in crypto, iGaming, and cap raises will be sent here periodically.\n\n"
@@ -616,7 +719,8 @@ def welcome_message() -> str:
         f"• Ethereum: {eth}\n"
         f"• $HYPE: {hype}\n"
         f"• Gold: {gold}\n"
-        f"• S&P 500: {sp500}\n\n"
+        f"• S&P 500: {sp500}\n"
+        f"• Titan Minerals: {titan}\n\n"
         "Will update you periodically! 📈"
     )
 
@@ -721,7 +825,8 @@ def post_news() -> None:
         medium = get_medium_news(mark_sent=False)
         cryptoheadlines = get_cryptoheadlines_news(mark_sent=False)
         defiant = get_defiant_newsletter_news(mark_sent=False)
-        logger.info("Hourly fetch: %d iGaming, %d CNBC, %d Crunchbase, %d WSJ, %d Medium, %d CryptoHeadlines, %d Defiant (unfiltered).", len(igaming), len(cnbc), len(crunchbase), len(wsj), len(medium), len(cryptoheadlines), len(defiant))
+        ecuador_mining = get_ecuador_mining_news(mark_sent=False)
+        logger.info("Hourly fetch: %d iGaming, %d CNBC, %d Crunchbase, %d WSJ, %d Medium, %d CryptoHeadlines, %d Defiant, %d Ecuador Mining (unfiltered).", len(igaming), len(cnbc), len(crunchbase), len(wsj), len(medium), len(cryptoheadlines), len(defiant), len(ecuador_mining))
     except Exception:  # noqa: BLE001
         logger.exception("Error in post_news")
 
