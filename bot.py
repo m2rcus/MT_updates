@@ -222,7 +222,7 @@ def fetch_crypto_prices() -> Tuple[str, str, str, str, str, str]:
     except Exception:  # noqa: BLE001
         logger.exception("Error fetching gold price")
     try:
-        titan_resp = requests.get("https://query1.finance.yahoo.com/v8/finance/chart/TTTNF", headers=GENERIC_HEADERS, timeout=REQUEST_TIMEOUT)
+        titan_resp = requests.get("https://query1.finance.yahoo.com/v8/finance/chart/TTM.AX", headers=GENERIC_HEADERS, timeout=REQUEST_TIMEOUT)
         if titan_resp.ok:
             titan_data = titan_resp.json()
             titan_price = f"${titan_data['chart']['result'][0]['meta']['regularMarketPrice']:,.2f}"
